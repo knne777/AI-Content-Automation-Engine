@@ -25,6 +25,16 @@ A powerful, modular framework designed to automate professional video creation w
    GOOGLE_API_KEY=your_key_here
    ```
 
+### 🏃 Running the Pipeline (Quick Start)
+After installation, you can execute the full automation pipeline for **Shorts** with a single command:
+
+```bash
+make icg-s-all
+```
+
+This will run all 7 steps sequentially (Script -> Images -> Audio -> Video -> Subtitles -> Music -> Cleanup). You can also run individual steps using `make icg-s-step<N>` (e.g., `make icg-s-step1`).
+
+
 ### 🛠️ Tech Stack
 - **Language**: Python 3.11+
 - **Dependency Management**: [Poetry](https://python-poetry.org/)
