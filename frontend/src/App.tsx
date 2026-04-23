@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import IdeaDetail from './pages/IdeaDetail';
+import Config from './pages/Config';
 
 function App() {
   return (
@@ -11,6 +12,10 @@ function App() {
             <Link to="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
               AI Content Factory
             </Link>
+            <div className="flex gap-4">
+              <Link to="/" className="hover:text-blue-400">Dashboard</Link>
+              <Link to="/config" className="hover:text-amber-400">Templates Config</Link>
+            </div>
           </div>
         </header>
 
@@ -18,6 +23,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/idea/:id" element={<IdeaDetail />} />
+            <Route path="/config" element={<Config />} />
           </Routes>
         </main>
       </div>

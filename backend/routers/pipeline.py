@@ -24,10 +24,10 @@ def get_pipeline(db: Session, orientation="short"):
     return p
 
 @router.post("/step1/{orientation}")
-def run_step1(orientation: str, db: Session = Depends(get_db)):
+def run_step1(orientation: str, template_id: int = None, db: Session = Depends(get_db)):
     pipeline = get_pipeline(db, orientation)
     try:
-        pipeline.step1_generate_story()
+        pipeline.step1_generate_story(template_id=template_id)
         return {"status": "success", "message": "Script generated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

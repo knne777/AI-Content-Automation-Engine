@@ -14,16 +14,32 @@ class IdeaState(str, enum.Enum):
     VIDEO_MUSIC_GENERATED = "VIDEO_MUSIC_GENERATED"
     COMPLETED = "COMPLETED"
 
+class VideoTemplate(Base):
+    __tablename__ = "video_templates"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(String, nullable=True)
+    scene_count = Column(Integer, default=12)
+    duration_secs = Column(Integer, default=60)
+    system_prompt = Column(Text)
+    audio_prompt = Column(Text)
+    ref_image_blob = Column(LargeBinary, nullable=True)
+    bg_music_blob = Column(LargeBinary, nullable=True)
+
+    ideas = relationship("Idea", back_populates="template")
+
 class Idea(Base):
     __tablename__ = "ideas"
 
     id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("video_templates.id"), nullable=True)
     title = Column(String, index=True)
     category = Column(String)
     state = Column(SQLEnum(IdeaState), default=IdeaState.PENDING)
     slug = Column(String)
     video_blob = Column(LargeBinary, nullable=True)
     
+    template = relationship("VideoTemplate", back_populates="ideas")
     scenes = relationship("Scene", back_populates="idea", cascade="all, delete-orphan")
 
 class Scene(Base):

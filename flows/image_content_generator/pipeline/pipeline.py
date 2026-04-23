@@ -205,11 +205,38 @@ class Pipeline(BaseModelTool):
         title_slug = slugify(title)
         return self.get_idea_path(idea_id) / f"{title_slug}.mp4"
 
-    def step1_generate_story(self):
+    def step1_generate_story(self, template_id: Optional[int] = None):
         Messenger.info("\n--- Generating cinematic concept and script ---")
-        idea_data, script, category = self.prompt_manager.generate_full_story(self.text_gen)
+        
+        if template_id:
+            from backend.models import VideoTemplate
+            from flows.image_content_generator.pipeline.prompt_base.models import BaseIdea, VideoScript
+            
+            template = self.store.db.query(VideoTemplate).filter(VideoTemplate.id == template_id).first()
+            if not template:
+                raise ValueError(f"Template {template_id} not found")
+
+            class DBTemplateIdea(BaseIdea):
+                IDEA_PROMPT = template.system_prompt
+
+            class CustomScript(VideoScript):
+                SCRIPT_PROMPT = template.system_prompt
+            
+            idea_data = self.text_gen.generate_text(DBTemplateIdea.get_idea_prompt(), DBTemplateIdea)
+            
+            script_prompt = CustomScript.get_full_script_prompt(idea_data)
+            script_prompt += f"\n\nATENCIÓN: Genera EXACTAMENTE {template.scene_count} escenas.\n"
+            
+            script = self.text_gen.generate_text(script_prompt, CustomScript)
+            category = f"Template_{template.name}"
+            self.prompt_manager.AUDIO_PROMPT = template.audio_prompt
+        else:
+            idea_data, script, category = self.prompt_manager.generate_full_story(self.text_gen)
 
         idea_obj = self.store.add_new_idea(idea_data.title, category)
+        if template_id:
+            idea_obj.template_id = template_id
+            
         self.save_json(idea_obj.id, self.IDEA_JSON, idea_data)
         self.save_json(idea_obj.id, self.SCRIPT_JSON, script)
         
@@ -459,8 +486,15 @@ class Pipeline(BaseModelTool):
             idea_obj.id, self.EDITIONS_DIR, self.FINAL_VIDEO
         )
 
-        # 3. Picks a random audio file
-        selected_music = self.audio_tool.get_random_audio()
+        # 3. Picks background music (Template DB -> Fallback Random)
+        selected_music = None
+        if idea_obj.template and idea_obj.template.bg_music_blob:
+            db_bg = self.get_idea_asset_path(idea_obj.id, self.EDITIONS_DIR, "db_bg_music.mp3")
+            db_bg.write_bytes(idea_obj.template.bg_music_blob)
+            selected_music = db_bg
+        else:
+            selected_music = self.audio_tool.get_random_audio()
+
         if not selected_music:
             return
 

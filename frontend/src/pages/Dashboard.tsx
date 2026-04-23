@@ -12,10 +12,13 @@ interface Idea {
 
 export default function Dashboard() {
     const [ideas, setIdeas] = useState<Idea[]>([]);
+    const [templates, setTemplates] = useState<{id: number, name: string}[]>([]);
+    const [selectedTemplate, setSelectedTemplate] = useState<number | ''>('');
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         fetchIdeas();
+        fetchTemplates();
     }, []);
 
     const fetchIdeas = async () => {
@@ -28,14 +31,30 @@ export default function Dashboard() {
             setLoading(false);
         }
     };
+    
+    // Quick inline override fetchIdeas to keep it working
+    const fetchTemplates = async () => {
+        try {
+            const res = await axios.get('/api/templates/');
+            setTemplates(res.data);
+            if (res.data.length > 0) setSelectedTemplate(res.data[0].id);
+        } catch (e) {}
+    }
 
     const runStep1 = async () => {
         setLoading(true);
         try {
-            await axios.post('/api/pipeline/step1/short');
-            await fetchIdeas();
+            let url = '/api/pipeline/step1/short';
+            if (selectedTemplate) url += `?template_id=${selectedTemplate}`;
+            await axios.post(url);
+            
+            // Refetch ideas
+            const res = await axios.get('/api/ideas/');
+            setIdeas(res.data);
         } catch (e) {
             alert("Error running step 1");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -43,13 +62,23 @@ export default function Dashboard() {
         <div className="space-y-6 animate-in fade-in duration-500">
             <div className="flex justify-between items-center">
                 <h1 className="text-3xl font-bold">Your Content Ideas</h1>
-                <button 
-                    onClick={runStep1} 
-                    className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5"
-                    disabled={loading}
-                >
-                    <Play size={18} /> Generate New Idea
-                </button>
+                <div className="flex gap-4">
+                    <select 
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white"
+                        value={selectedTemplate}
+                        onChange={e => setSelectedTemplate(+e.target.value)}
+                    >
+                        <option value="">Legacy (Random Config)</option>
+                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <button 
+                        onClick={runStep1} 
+                        className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5"
+                        disabled={loading}
+                    >
+                        <Play size={18} /> Generate New Idea
+                    </button>
+                </div>
             </div>
 
             {loading ? (
