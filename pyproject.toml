@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Video Automation Project"
 authors = ["Hans <hans.acha.brand@gmail.com>"]
 readme = "README.md"
-packages = [{ include = "flows" }]
+packages = [{ include = "flows" }, { include = "tools" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -16,6 +16,13 @@ pillow = "^12.1.0"
 pydantic = "^2.12.5"
 selenium = "^4.41.0"
 pydantic-settings = "^2.13.1"
+fastapi = {extras = ["standard"], version = "^0.115.6"}
+uvicorn = "^0.34.0"
+sqlalchemy = "^2.0.36"
+psycopg2-binary = "^2.9.10"
+google-api-python-client = "^2.158.0"
+google-auth-oauthlib = "^1.2.1"
+alembic = "^1.14.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^26.3.1"

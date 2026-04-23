@@ -8,10 +8,15 @@ from flows.image_content_generator.pipeline.prompt_base.models import VideoScrip
 from flows.image_content_generator.pipeline.prompt_longs.manager import PromptManagerLongs
 from flows.image_content_generator.pipeline.prompt_shorts.manager import PromptManagerShorts
 from flows.image_content_generator.pipeline.schemas import AudioAlignment, State, VideoOrientation
-from flows.image_content_generator.pipeline.storage_csv import CsvStore
 from tools.audio_generation.audio_tool import AudioTool
 from tools.audio_generation.gemini import GeminiAudioGenerator
 from tools.common.base_model import BaseModelTool
+from backend.models import IdeaState
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from backend.models import Idea
+    from flows.image_content_generator.pipeline.storage_db import DbStore
+    from flows.image_content_generator.pipeline.storage_db import DbStore
 from tools.common.messenger import Messenger
 from tools.image_generation.gemini import GeminiImageGenerator
 from tools.image_generation.midjourney import ImageTask
@@ -41,7 +46,7 @@ class Pipeline(BaseModelTool):
     _whisper: Optional[WhisperTool] = PrivateAttr(default=None)
     _prompt_manager: Optional[PromptManager] = PrivateAttr(default=None)
     _audio_tool: Optional[AudioTool] = PrivateAttr(default=None)
-    _store: Optional[CsvStore] = PrivateAttr(default=None)
+    _store: Any = PrivateAttr(default=None)
 
     # Standard Output Directories
     IDEAS_DIR: ClassVar[str] = "ideas"
@@ -76,10 +81,8 @@ class Pipeline(BaseModelTool):
         super().__init__(**kwargs)
 
     @property
-    def store(self) -> CsvStore:
-        if self._store is None:
-            csv_path = self.out_base / self.IDEAS_TRACKING_CSV
-            self._store = CsvStore(csv_path=csv_path)
+    def store(self):
+        # We assume the caller injected _store in the API endpoint
         return self._store
 
     @property
@@ -203,42 +206,23 @@ class Pipeline(BaseModelTool):
         return self.get_idea_path(idea_id) / f"{title_slug}.mp4"
 
     def step1_generate_story(self):
-        """
-        Generate Concept & Script: Creates a cinematic idea and expands it into a storyboard.
-        1. Generates concept and script using PromptManager.
-        2. Registers the new idea in tracking CSV.
-        3. Saves idea.json and script.json.
-        4. Updates state to SCRIPT_GENERATED.
-        """
         Messenger.info("\n--- Generating cinematic concept and script ---")
+        idea_data, script, category = self.prompt_manager.generate_full_story(self.text_gen)
 
-        # 1. Generates full story (Concept + Script)
-        idea_data, script, category = self.prompt_manager.generate_full_story(
-            self.text_gen
-        )
-
-        # 2. Registers the new idea in tracking CSV.
         idea_obj = self.store.add_new_idea(idea_data.title, category)
-
-        # 3. Saves JSONs
         self.save_json(idea_obj.id, self.IDEA_JSON, idea_data)
         self.save_json(idea_obj.id, self.SCRIPT_JSON, script)
+        
+        # Save scenes to DB
+        scenes_data = [{"image_prompt": s.image_prompt.formatted_prompt, "narration": s.narration} for s in script.scenes]
+        self.store.update_scenes(idea_obj.id, scenes_data)
 
-        # 4. Updates state
-        idea_obj.state = State.SCRIPT_GENERATED
+        idea_obj.state = IdeaState.SCRIPT_GENERATED
         self.store.save(idea_obj)
-        Messenger.success(f"Step 1 ready: {State.SCRIPT_GENERATED} finalized.\n")
+        Messenger.success(f"Step 1 ready: {IdeaState.SCRIPT_GENERATED} finalized.\n")
 
-    def step2_generate_images(self):
-        """
-        Generate Images: Produces photorealistic visuals for each scene.
-        1. Retrieves the SCRIPT_GENERATED idea.
-        2. Loads script.json for scene data.
-        3. Generates Images
-        4. Updates state.
-        """
-        # 1. Retrieves SCRIPT_GENERATED idea.
-        idea_obj = self.store.get_first_by_state(State.SCRIPT_GENERATED)
+    def step2_generate_images(self, idea_id: Optional[int] = None):
+        idea_obj = self.store.get_idea(idea_id) if idea_id else self.store.get_first_by_state(IdeaState.APPROVED)
         if not idea_obj:
             Messenger.error("No script ready for images generation.")
             return
@@ -265,18 +249,23 @@ class Pipeline(BaseModelTool):
         # 4. Process all tasks (batching handled internally by the generator)
         self.image_gen.generate_images(tasks=all_tasks)
 
+        # 4.5 Save generated images to DB as blobs
+        for i, scene_db in enumerate(idea_obj.scenes):
+            out_path = self.get_idea_asset_path(
+                idea_obj.id, self.IMAGES_DIR, self.SCENE_IMAGE_PATTERN.format(i + 1)
+            )
+            if out_path.exists():
+                with open(out_path, "rb") as f:
+                    scene_db.image_blob = f.read()
+
         # 5. Updates state
-        idea_obj.state = State.IMAGES_GENERATED
+        idea_obj.state = IdeaState.IMAGES_GENERATED
         self.store.save(idea_obj)
-        Messenger.success(f"Step 2 ready: {State.IMAGES_GENERATED} finalized.\n")
+        Messenger.success(f"Step 2 ready: {IdeaState.IMAGES_GENERATED} finalized.\n")
 
     @retry(max_attempts=3)
-    def step3_generate_audios(self):
-        """
-        Generate Audio: Batched AI-Guided Batching (Whisper + Gemini).
-        Processes scenes in groups of 10 for maximum stability and alignment precision.
-        """
-        idea_obj = self.store.get_first_by_state(State.IMAGES_GENERATED)
+    def step3_generate_audios(self, idea_id: Optional[int] = None):
+        idea_obj = self.store.get_idea(idea_id) if idea_id else self.store.get_first_by_state(IdeaState.IMAGES_GENERATED)
         if not idea_obj:
             Messenger.error("No images ready for audio generation.")
             return
@@ -374,21 +363,12 @@ class Pipeline(BaseModelTool):
             chunk_audio_path.unlink(missing_ok=True)
 
         # Final Update
-        idea_obj.state = State.AUDIO_GENERATED
+        idea_obj.state = IdeaState.AUDIO_GENERATED
         self.store.save(idea_obj)
-        Messenger.success(f"Step 3 ready: {State.AUDIO_GENERATED} finalized.\n")
+        Messenger.success(f"Step 3 ready: {IdeaState.AUDIO_GENERATED} finalized.\n")
 
-    def step4_generate_videos(self):
-        """
-        Generate Videos: Batch Video Generation (FFmpeg).
-        1. Retrieves the AUDIO_GENERATED idea.
-        2. Loads script.json for scene data.
-        3. Merges assets into scene clips.
-        4. Final video concatenation.
-        5. Updates state.
-        """
-        # 1. Retrieves AUDIO_GENERATED idea.
-        idea_obj = self.store.get_first_by_state(State.AUDIO_GENERATED)
+    def step4_generate_videos(self, idea_id: Optional[int] = None):
+        idea_obj = self.store.get_idea(idea_id) if idea_id else self.store.get_first_by_state(IdeaState.AUDIO_GENERATED)
         if not idea_obj:
             Messenger.error("No audio ready for video generation.")
             return
@@ -420,22 +400,12 @@ class Pipeline(BaseModelTool):
         self.ffmpeg.concat_videos(scene_videos, raw_video)
 
         # 5. Updates state.
-        idea_obj.state = State.VIDEO_GENERATED
+        idea_obj.state = IdeaState.VIDEO_GENERATED
         self.store.save(idea_obj)
-        Messenger.success(f"Step 4 ready: {State.VIDEO_GENERATED} finalized.\n")
+        Messenger.success(f"Step 4 ready: {IdeaState.VIDEO_GENERATED} finalized.\n")
 
-    def step5_generate_subtitles(self):
-        """
-        Generate Subtitles: Adds subtitles to the video.
-        1. Retrieves the VIDEO_GENERATED idea.
-        2. Prepares directories.
-        3. Extracts audio.
-        4. Generates srt.
-        5. Adds subtitles to final video.
-        6. Updates state.
-        """
-        # 1. Retrieves VIDEO_GENERATED idea.
-        idea_obj = self.store.get_first_by_state(State.VIDEO_GENERATED)
+    def step5_generate_subtitles(self, idea_id: Optional[int] = None):
+        idea_obj = self.store.get_idea(idea_id) if idea_id else self.store.get_first_by_state(IdeaState.VIDEO_GENERATED)
         if not idea_obj:
             Messenger.error("No video ready for subtitle generation.")
             return
@@ -469,21 +439,12 @@ class Pipeline(BaseModelTool):
         self.ffmpeg.add_subtitles_to_video(raw_video, subs_srt, subtitled_video)
 
         # 6. Updates state.
-        idea_obj.state = State.VIDEO_SUBTITLED
+        idea_obj.state = IdeaState.VIDEO_SUBTITLED
         self.store.save(idea_obj)
-        Messenger.success(f"Step 5 ready: {State.VIDEO_SUBTITLED} finalized.\n")
+        Messenger.success(f"Step 5 ready: {IdeaState.VIDEO_SUBTITLED} finalized.\n")
 
-    def step6_add_background_music(self):
-        """
-        Background Music: Adds a random background track to the subtitled video.
-        1. Retrieves the VIDEO_SUBTITLED idea.
-        2. Prepares directories.
-        3. Picks a random audio file.
-        4. Mixes it with low volume and looping.
-        5. Updates state.
-        """
-        # 1. Retrieves VIDEO_SUBTITLED idea.
-        idea_obj = self.store.get_first_by_state(State.VIDEO_SUBTITLED)
+    def step6_add_background_music(self, idea_id: Optional[int] = None):
+        idea_obj = self.store.get_idea(idea_id) if idea_id else self.store.get_first_by_state(IdeaState.VIDEO_SUBTITLED)
         if not idea_obj:
             Messenger.error("No subtitled video found to add music.")
             return
@@ -512,20 +473,12 @@ class Pipeline(BaseModelTool):
         )
 
         # 5. Updates state.
-        idea_obj.state = State.VIDEO_MUSIC_GENERATED
+        idea_obj.state = IdeaState.VIDEO_MUSIC_GENERATED
         self.store.save(idea_obj)
-        Messenger.success(f"Step 6 ready: {State.VIDEO_MUSIC_GENERATED} finalized.\n")
+        Messenger.success(f"Step 6 ready: {IdeaState.VIDEO_MUSIC_GENERATED} finalized.\n")
 
-    def step7_rename_final_video(self):
-        """
-        Rename Final Video: Renames the final video to match the script title.
-        1. Retrieves the VIDEO_MUSIC_GENERATED idea.
-        2. Prepares directories.
-        3. Renames the final video.
-        4. Updates state.
-        """
-        # 1. Retrieves VIDEO_MUSIC_GENERATED idea.
-        idea_obj = self.store.get_first_by_state(State.VIDEO_MUSIC_GENERATED)
+    def step7_rename_final_video(self, idea_id: Optional[int] = None):
+        idea_obj = self.store.get_idea(idea_id) if idea_id else self.store.get_first_by_state(IdeaState.VIDEO_MUSIC_GENERATED)
         if not idea_obj:
             Messenger.error("No video with music found to rename.")
             return
@@ -545,7 +498,12 @@ class Pipeline(BaseModelTool):
         named_final = self.get_named_video_path(idea_obj.id, video_title)
         final_video.rename(named_final)
 
+        # 3.5 Save video to DB as blob
+        if named_final.exists():
+            with open(named_final, "rb") as f:
+                idea_obj.video_blob = f.read()
+
         # 4. Updates state.
-        idea_obj.state = State.COMPLETED
+        idea_obj.state = IdeaState.COMPLETED
         self.store.save(idea_obj)
-        Messenger.success(f"Step 7 ready: {State.COMPLETED} finalized.\n")
+        Messenger.success(f"Step 7 ready: {IdeaState.COMPLETED} finalized.\n")
