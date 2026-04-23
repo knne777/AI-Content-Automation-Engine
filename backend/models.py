@@ -14,6 +14,19 @@ class IdeaState(str, enum.Enum):
     VIDEO_MUSIC_GENERATED = "VIDEO_MUSIC_GENERATED"
     COMPLETED = "COMPLETED"
 
+class TemplateAssetType(str, enum.Enum):
+    IMAGE = "IMAGE"
+    MUSIC = "MUSIC"
+
+class TemplateAsset(Base):
+    __tablename__ = "template_assets"
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("video_templates.id"))
+    asset_type = Column(SQLEnum(TemplateAssetType))
+    blob_data = Column(LargeBinary)
+    
+    template = relationship("VideoTemplate", back_populates="assets")
+
 class VideoTemplate(Base):
     __tablename__ = "video_templates"
     id = Column(Integer, primary_key=True, index=True)
@@ -23,10 +36,9 @@ class VideoTemplate(Base):
     duration_secs = Column(Integer, default=60)
     system_prompt = Column(Text)
     audio_prompt = Column(Text)
-    ref_image_blob = Column(LargeBinary, nullable=True)
-    bg_music_blob = Column(LargeBinary, nullable=True)
 
     ideas = relationship("Idea", back_populates="template")
+    assets = relationship("TemplateAsset", back_populates="template", cascade="all, delete-orphan")
 
 class Idea(Base):
     __tablename__ = "ideas"

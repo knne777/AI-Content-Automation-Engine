@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Settings, Plus, Edit2, Trash2, X, UploadCloud, FileAudio, FileImage, LayoutTemplate } from 'lucide-react';
 
+interface TemplateAsset {
+  id: number;
+  asset_type: 'IMAGE' | 'MUSIC';
+}
+
 interface VideoTemplate {
   id: number;
   name: string;
@@ -10,6 +15,7 @@ interface VideoTemplate {
   duration_secs: number;
   system_prompt: string;
   audio_prompt: string;
+  assets: TemplateAsset[];
 }
 
 const emptyForm = { name: '', description: '', scene_count: 12, duration_secs: 60, system_prompt: '', audio_prompt: '' };
@@ -66,8 +72,14 @@ const Config: React.FC = () => {
   const uploadFile = async (id: number, type: 'image' | 'music', file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    await axios.post(`/api/templates/${id}/${type}`, formData);
-    alert('Upload success 🦍');
+    await axios.post(`/api/templates/${id}/assets/${type}`, formData);
+    fetchTemplates();
+  };
+
+  const deleteAsset = async (assetId: number) => {
+    if(!confirm("Hulk smash asset?")) return;
+    await axios.delete(`/api/templates/assets/${assetId}`);
+    fetchTemplates();
   };
 
   return (
@@ -107,21 +119,50 @@ const Config: React.FC = () => {
               <span className="bg-gray-800 px-3 py-1 rounded-full text-blue-400 border border-gray-700">{t.duration_secs}s</span>
             </div>
 
-            <div className="space-y-3 pt-4 border-t border-gray-700/50">
-              <div className="flex justify-between items-center bg-gray-800/50 p-2 rounded-lg border border-gray-700 transition hover:bg-gray-800 text-sm">
-                <span className="flex items-center gap-2 text-gray-300"><FileImage size={16} className="text-emerald-400"/> Ref Image</span>
-                <label className="cursor-pointer text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold">
-                  Upload <UploadCloud size={14}/>
-                  <input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && uploadFile(t.id, 'image', e.target.files[0])} />
-                </label>
-              </div>
-              <div className="flex justify-between items-center bg-gray-800/50 p-2 rounded-lg border border-gray-700 transition hover:bg-gray-800 text-sm">
-                <span className="flex items-center gap-2 text-gray-300"><FileAudio size={16} className="text-purple-400"/> Bg Music</span>
-                <label className="cursor-pointer text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold">
-                  Upload <UploadCloud size={14}/>
-                  <input type="file" className="hidden" accept="audio/*" onChange={e => e.target.files && uploadFile(t.id, 'music', e.target.files[0])} />
-                </label>
-              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="flex justify-between mb-2">
+                    <label className="text-xs block">Ref Images</label>
+                    <label className="cursor-pointer bg-gray-800 text-xs text-amber-400 hover:text-amber-300 py-1 px-3 rounded-lg border border-gray-700 font-bold">
+                      Add <UploadCloud size={14} className="inline"/>
+                      <input type="file" className="hidden" accept="image/*" onChange={e => {
+                          if (e.target.files) uploadFile(t.id, 'image', e.target.files[0]) 
+                      }} />
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {t.assets.filter(a => a.asset_type === 'IMAGE').map(a => (
+                      <div key={a.id} className="relative group/asset">
+                        <img 
+                          src={`/api/templates/assets/${a.id}`} 
+                          alt="Ref" 
+                          className="w-16 h-16 object-cover rounded-lg border border-gray-700" 
+                        />
+                        <button onClick={() => deleteAsset(a.id)} className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover/asset:opacity-100 transition-opacity"><X size={12}/></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between mb-2">
+                    <label className="text-xs block">Bg Music (.mp3)</label>
+                    <label className="cursor-pointer bg-gray-800 text-xs text-amber-400 hover:text-amber-300 py-1 px-3 rounded-lg border border-gray-700 font-bold">
+                      Add <UploadCloud size={14} className="inline"/>
+                      <input type="file" className="hidden" accept="audio/*" onChange={e => {
+                          if (e.target.files) uploadFile(t.id, 'music', e.target.files[0])
+                      }} />
+                    </label>
+                  </div>
+                  <div className="flex flex-col gap-2 relative">
+                    {t.assets.filter(a => a.asset_type === 'MUSIC').map((a, i) => (
+                      <div key={a.id} className="flex items-center gap-2 group/asset">
+                        <span className="text-xs text-gray-500 font-mono">#{i+1}</span>
+                        <audio src={`/api/templates/assets/${a.id}`} controls className="h-6 w-full" />
+                        <button onClick={() => deleteAsset(a.id)} className="text-red-600 opacity-0 group-hover/asset:opacity-100 transition-opacity"><Trash2 size={14}/></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
             </div>
           </div>
         ))}

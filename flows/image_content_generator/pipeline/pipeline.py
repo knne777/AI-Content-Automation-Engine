@@ -488,11 +488,17 @@ class Pipeline(BaseModelTool):
 
         # 3. Picks background music (Template DB -> Fallback Random)
         selected_music = None
-        if idea_obj.template and idea_obj.template.bg_music_blob:
-            db_bg = self.get_idea_asset_path(idea_obj.id, self.EDITIONS_DIR, "db_bg_music.mp3")
-            db_bg.write_bytes(idea_obj.template.bg_music_blob)
-            selected_music = db_bg
-        else:
+        if idea_obj.template:
+            from backend.models import TemplateAssetType
+            music_assets = [a for a in idea_obj.template.assets if a.asset_type == TemplateAssetType.MUSIC]
+            if music_assets:
+                import random
+                chosen_asset = random.choice(music_assets)
+                db_bg = self.get_idea_asset_path(idea_obj.id, self.EDITIONS_DIR, f"db_bg_music_{chosen_asset.id}.mp3")
+                db_bg.write_bytes(chosen_asset.blob_data)
+                selected_music = db_bg
+                
+        if not selected_music:
             selected_music = self.audio_tool.get_random_audio()
 
         if not selected_music:
