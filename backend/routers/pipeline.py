@@ -60,3 +60,64 @@ def run_remaining_steps(idea_id: int, orientation: str):
         print("Pipeline background error:", e)
     finally:
         db.close()
+
+from pydantic import BaseModel
+class YouTubeCode(BaseModel):
+    code: str
+
+@router.get("/youtube/auth")
+def youtube_auth_url():
+    from tools.youtube.publish import get_auth_url
+    try:
+        url = get_auth_url()
+        return {"auth_url": url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/youtube/callback")
+def youtube_callback(body: YouTubeCode):
+    from tools.youtube.publish import exchange_code
+    try:
+        exchange_code(body.code)
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/publish/{idea_id}")
+def publish_idea(idea_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    idea = db.query(Idea).filter(Idea.id == idea_id).first()
+    if not idea or idea.state != IdeaState.COMPLETED:
+        raise HTTPException(status_code=400, detail="Idea not completed")
+        
+    def _publish_task():
+        from backend.database import SessionLocal
+        local_db = SessionLocal()
+        try:
+            local_idea = local_db.query(Idea).filter(Idea.id == idea_id).first()
+            if not local_idea: return
+            
+            local_idea.status_msg = "Subiendo a YouTube 🚀"
+            local_db.commit()
+            
+            p = get_pipeline(local_db, "short") # assume short for now
+            title = local_idea.title if local_idea.title else f"video_{local_idea.id}"
+            video_path = p.get_named_video_path(local_idea.id, title)
+            
+            from tools.youtube.publish import publish_video
+            response = publish_video(
+                file_path=str(video_path), 
+                title=local_idea.title, 
+                description=f"{local_idea.title} - Automatically generated",
+                tags=["AI", "Shorts"]
+            )
+            
+            local_idea.status_msg = "Publicado en YT ✅"
+            local_db.commit()
+            print("YouTube Upload Response:", response)
+        except Exception as e:
+            print("YouTube publish error:", e)
+        finally:
+            local_db.close()
+
+    background_tasks.add_task(_publish_task)
+    return {"status": "success", "message": "Publishing started"}

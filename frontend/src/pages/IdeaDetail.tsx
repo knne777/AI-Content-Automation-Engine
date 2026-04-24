@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
-import { ArrowLeft, CheckCircle, Video, Globe } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Video, Globe, X } from 'lucide-react';
 
 interface Scene {
     id: number;
@@ -24,6 +24,9 @@ export default function IdeaDetail() {
     const [idea, setIdea] = useState<Idea | null>(null);
     const [scenes, setScenes] = useState<Scene[]>([]);
     const [loading, setLoading] = useState(true);
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [authUrl, setAuthUrl] = useState('');
+    const [authCode, setAuthCode] = useState('');
 
     useEffect(() => {
         fetchIdea();
@@ -43,6 +46,33 @@ export default function IdeaDetail() {
             setLoading(false);
         }
     };
+
+    const handlePublishClick = async () => {
+        if (!idea) return;
+        try {
+            await axios.post(`/api/pipeline/publish/${idea.id}`);
+            alert("Subida a YouTube iniciada 🚀 Revisa el dashboard para el estatus.");
+        } catch (e) {
+            // Probably auth error
+            try {
+                const res = await axios.get('/api/pipeline/youtube/auth');
+                setAuthUrl(res.data.auth_url);
+                setShowAuthModal(true);
+            } catch(e2) {
+                alert("Falta el archivo client_secret.json en tools/youtube/ o hay otro error.");
+            }
+        }
+    }
+
+    const submitCode = async () => {
+        try {
+            await axios.post('/api/pipeline/youtube/callback', { code: authCode });
+            setShowAuthModal(false);
+            handlePublishClick(); // try again
+        } catch (e) {
+            alert("Código inválido o error guardando token.");
+        }
+    }
 
     const approveScript = async () => {
         if (!confirm("Approve script and start media generation? (Costs API credits)")) return;
@@ -89,7 +119,7 @@ export default function IdeaDetail() {
                             </button>
                         )}
                         {isCompleted && (
-                            <button className="w-full flex justify-center items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-semibold px-6 py-3 rounded-xl transition-all shadow-lg hover:shadow-red-500/20 transform hover:-translate-y-0.5">
+                            <button onClick={handlePublishClick} className="w-full flex justify-center items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-semibold px-6 py-3 rounded-xl transition-all shadow-lg hover:shadow-red-500/20 transform hover:-translate-y-0.5">
                                 <Globe size={18} /> Publish to YouTube
                             </button>
                         )}
@@ -153,6 +183,39 @@ export default function IdeaDetail() {
                     ))}
                 </div>
             </div>
+
+            {/* Auth Modal */}
+            {showAuthModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowAuthModal(false)}></div>
+                    <div className="relative bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl p-6">
+                        <div className="flex justify-between items-center mb-4 border-b border-gray-800 pb-4">
+                            <h2 className="text-xl font-bold flex items-center gap-2"><Globe className="text-red-500"/> Vincular YouTube</h2>
+                            <button onClick={() => setShowAuthModal(false)} className="text-gray-400 hover:text-white"><X size={24}/></button>
+                        </div>
+                        <div className="space-y-4">
+                            <p className="text-gray-300 text-sm leading-relaxed">
+                                Necesitas autorizar a la API para subir videos. Entra al siguiente link, autoriza la app, y pega el <b>código</b> que te dará Google aquí abajo.
+                            </p>
+                            <a href={authUrl} target="_blank" rel="noopener noreferrer" className="block text-center text-blue-400 hover:text-blue-300 font-bold bg-blue-900/30 py-3 rounded-xl border border-blue-500/50">
+                                Abrir página de Autorización
+                            </a>
+                            <div className="pt-2">
+                                <label className="text-xs text-gray-400 uppercase font-bold block mb-2">Pega tu Código aquí</label>
+                                <input 
+                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-red-500"
+                                    value={authCode}
+                                    onChange={e => setAuthCode(e.target.value)}
+                                    placeholder="e.g. 4/0AfJohX..."
+                                />
+                            </div>
+                            <button onClick={submitCode} className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl shadow-lg mt-4">
+                                Confirmar y Publicar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

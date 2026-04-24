@@ -48,6 +48,7 @@ class Idea(Base):
     title = Column(String, index=True)
     category = Column(String)
     state = Column(SQLEnum(IdeaState), default=IdeaState.PENDING)
+    status_msg = Column(String, nullable=True)
     slug = Column(String)
     video_blob = Column(LargeBinary, nullable=True)
     

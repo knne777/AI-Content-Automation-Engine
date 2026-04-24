@@ -244,6 +244,7 @@ class Pipeline(BaseModelTool):
         scenes_data = [{"image_prompt": s.image_prompt.formatted_prompt, "narration": s.narration} for s in script.scenes]
         self.store.update_scenes(idea_obj.id, scenes_data)
 
+        idea_obj.status_msg = "Completado ✅"
         idea_obj.state = IdeaState.SCRIPT_GENERATED
         self.store.save(idea_obj)
         Messenger.success(f"Step 1 ready: {IdeaState.SCRIPT_GENERATED} finalized.\n")
@@ -273,8 +274,15 @@ class Pipeline(BaseModelTool):
                 ImageTask(prompt=scene.image_prompt.formatted_prompt, output_path=out_path)
             )
 
-        # 4. Process all tasks (batching handled internally by the generator)
-        self.image_gen.generate_images(tasks=all_tasks)
+        # 4. Process all tasks and update status live
+        for idx, task in enumerate(all_tasks, start=1):
+            idea_obj.status_msg = f"Generando Imagen {idx}/{len(all_tasks)} 🪄"
+            self.store.save(idea_obj)
+            self.image_gen.generate_image(
+                prompt=task.prompt,
+                output_path=task.output_path,
+                style_references=self.image_gen.style_references
+            )
 
         # 4.5 Save generated images to DB as blobs
         for i, scene_db in enumerate(idea_obj.scenes):
@@ -302,6 +310,7 @@ class Pipeline(BaseModelTool):
 
         total_scenes = len(script_data.scenes)
         batch_size = 15
+        total_chunks = ((total_scenes - 1) // batch_size) + 1
 
         for start_idx in range(0, total_scenes, batch_size):
             end_idx = min(start_idx + batch_size, total_scenes)
@@ -341,6 +350,8 @@ class Pipeline(BaseModelTool):
             segments = self.whisper.get_transcription_segments(chunk_audio_path)
 
             # 4. Align chunk
+            idea_obj.status_msg = f"Generando lote de audio {batch_num}/{total_chunks} 🎙️"
+            self.store.save(idea_obj)
             Messenger.info(f"Aligning Batch {batch_num} via Gemini...")
             chunk_script_texts = [s.narration for s in chunk]
             prompt = self.prompt_manager.get_alignment_prompt(segments, chunk_script_texts)
@@ -418,6 +429,8 @@ class Pipeline(BaseModelTool):
                 idea_obj.id, self.VIDEOS_DIR, self.SCENE_VIDEO_PATTERN.format(i + 1)
             )
 
+            idea_obj.status_msg = f"Montando Video {i+1}/{len(script_data.scenes)} 🎬"
+            self.store.save(idea_obj)
             Messenger.info(f"Stitching Scene {i+1} with 3-part dynamic effect...")
             self.ffmpeg.create_composite_scene_video(image_path, audio_path, video_path)
             scene_videos.append(video_path)
@@ -457,6 +470,8 @@ class Pipeline(BaseModelTool):
         Messenger.info("Extracting audio for transcription...")
         self.ffmpeg.extract_audio(raw_video, audio_wav)
 
+        idea_obj.status_msg = "Generando y pegando subtítulos 📝..."
+        self.store.save(idea_obj)
         # 4. Generate srt
         Messenger.info("Transcribing audio via Whisper.cpp...")
         self.whisper.generate_srt(audio_wav, subs_srt)
@@ -513,6 +528,7 @@ class Pipeline(BaseModelTool):
         )
 
         # 5. Updates state.
+        idea_obj.status_msg = "Último repaso y render final ✨"
         idea_obj.state = IdeaState.VIDEO_MUSIC_GENERATED
         self.store.save(idea_obj)
         Messenger.success(f"Step 6 ready: {IdeaState.VIDEO_MUSIC_GENERATED} finalized.\n")
@@ -544,6 +560,7 @@ class Pipeline(BaseModelTool):
                 idea_obj.video_blob = f.read()
 
         # 4. Updates state.
+        idea_obj.status_msg = "¡Completado! Listo para publicarse 🚀"
         idea_obj.state = IdeaState.COMPLETED
         self.store.save(idea_obj)
         Messenger.success(f"Step 7 ready: {IdeaState.COMPLETED} finalized.\n")
